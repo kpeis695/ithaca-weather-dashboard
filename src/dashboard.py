@@ -16,12 +16,32 @@ class IthacaWeatherDashboard:
     def __init__(self, db_path="data/weather.db"):
         self.db_path = db_path
         self.app = dash.Dash(__name__)
+        self.demo_mode = not os.path.exists(db_path)
         self.setup_layout()
         self.setup_callbacks()
+    
+    def create_sample_data_if_needed(self):
+        """Create sample data if no database exists"""
+        if self.demo_mode:
+            try:
+                # Import and run sample data generator
+                from sample_data import create_sample_weather_data
+                create_sample_weather_data(self.db_path)
+                self.demo_mode = False
+                print("✅ Created sample data for demo")
+            except Exception as e:
+                print(f"⚠️ Running in demo mode without data: {e}")
     
     def get_weather_data(self, hours=24):
         """Get weather data from database"""
         try:
+            # Try to create sample data if needed
+            if self.demo_mode:
+                self.create_sample_data_if_needed()
+            
+            if not os.path.exists(self.db_path):
+                return pd.DataFrame()
+            
             conn = sqlite3.connect(self.db_path)
             
             since = datetime.now() - timedelta(hours=hours)
@@ -46,7 +66,25 @@ class IthacaWeatherDashboard:
         """Get the most recent weather conditions for all locations"""
         df = self.get_weather_data(hours=1)
         if df.empty:
-            return {}
+            # Return demo data if no real data
+            return {
+                "Downtown Ithaca": {
+                    'temperature': 62.3, 'feels_like': 64.1, 'condition': 'Partly Cloudy',
+                    'humidity': 68, 'wind_speed': 7.2, 'timestamp': datetime.now()
+                },
+                "Cornell Campus": {
+                    'temperature': 60.8, 'feels_like': 62.5, 'condition': 'Overcast',
+                    'humidity': 72, 'wind_speed': 8.1, 'timestamp': datetime.now()
+                },
+                "Ithaca College": {
+                    'temperature': 61.5, 'feels_like': 63.2, 'condition': 'Cloudy',
+                    'humidity': 70, 'wind_speed': 6.8, 'timestamp': datetime.now()
+                },
+                "Cayuga Lake": {
+                    'temperature': 64.1, 'feels_like': 65.8, 'condition': 'Partly Cloudy',
+                    'humidity': 65, 'wind_speed': 5.9, 'timestamp': datetime.now()
+                }
+            }
         
         latest_data = {}
         for location in df['location'].unique():
@@ -68,9 +106,11 @@ class IthacaWeatherDashboard:
         
         if df.empty:
             return go.Figure().add_annotation(
-                text="No data available. Run the scraper first!",
+                text="🌤️ Demo Mode: This dashboard analyzes Ithaca's unpredictable weather patterns<br>" +
+                     "In production, this shows real-time temperature trends from 4 monitoring locations<br>" +
+                     "Run locally with live data using the scraper for full functionality",
                 xref="paper", yref="paper", x=0.5, y=0.5,
-                showarrow=False, font_size=16
+                showarrow=False, font_size=14, align="center"
             )
         
         fig = px.line(df, x='timestamp', y='temperature', 
@@ -134,9 +174,11 @@ class IthacaWeatherDashboard:
         
         if df.empty:
             return go.Figure().add_annotation(
-                text="No data for variance analysis",
+                text="🌡️ Weather Unpredictability Analysis<br>" +
+                     "This chart shows temperature variance across Ithaca locations<br>" +
+                     "Higher values indicate more unpredictable weather conditions",
                 xref="paper", yref="paper", x=0.5, y=0.5,
-                showarrow=False, font_size=16
+                showarrow=False, font_size=14, align="center"
             )
         
         # Calculate temperature variance by hour
@@ -165,7 +207,25 @@ class IthacaWeatherDashboard:
     
     def setup_layout(self):
         """Setup the dashboard layout"""
+        demo_banner = html.Div([
+            html.Div([
+                "🌤️ LIVE DEMO - Ithaca Weather Intelligence Dashboard",
+                html.Br(),
+                "Interactive weather analytics for Ithaca's unpredictable climate"
+            ], style={
+                'backgroundColor': '#3498db',
+                'color': 'white',
+                'padding': '10px',
+                'textAlign': 'center',
+                'fontWeight': 'bold',
+                'marginBottom': '20px',
+                'borderRadius': '5px'
+            })
+        ]) if self.demo_mode else html.Div()
+        
         self.app.layout = html.Div([
+            demo_banner,
+            
             # Header
             html.Div([
                 html.H1("Ithaca Weather Intelligence Dashboard", 
@@ -212,8 +272,8 @@ class IthacaWeatherDashboard:
             html.Div([
                 html.Hr(),
                 html.P([
-                    "Data collected from Downtown Ithaca, Cornell Campus, Ithaca College, and Cayuga Lake | ",
-                    html.A("View on GitHub", href="https://github.com/kpeis695/ithaca-weather-dashboard", 
+                    "Data monitoring: Downtown Ithaca, Cornell Campus, Ithaca College, and Cayuga Lake | ",
+                    html.A("View Source Code", href="https://github.com/kpeis695/ithaca-weather-dashboard", 
                           target="_blank")
                 ], style={'textAlign': 'center', 'color': '#95a5a6', 'fontSize': '12px'})
             ])
@@ -273,8 +333,10 @@ class IthacaWeatherDashboard:
         """Run the dashboard"""
         print(f"🌤️ Starting Ithaca Weather Dashboard...")
         print(f"📊 Dashboard will be available at: http://localhost:{port}")
+        if self.demo_mode:
+            print("🎯 Running in demo mode - will show sample data")
         print(f"🔄 Data updates every 5 minutes")
-        self.app.run(debug=debug, port=port)
+        self.app.run(host="0.0.0.0", port=port, debug=debug)
 
 if __name__ == "__main__":
     dashboard = IthacaWeatherDashboard()
