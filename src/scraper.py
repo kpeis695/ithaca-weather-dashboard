@@ -9,8 +9,7 @@ class IthacaWeatherScraper:
     def __init__(self, api_key: str, db_path: str = "data/weather.db"):
         self.api_key = api_key
         self.db_path = db_path
-        self.base_url = "http://api.openweathermap.org/data/2.5/weather"
-        self.forecast_url = "http://api.openweathermap.org/data/2.5/forecast"
+        self.base_url = "http://api.weatherapi.com/v1/current.json"
         
         # Ithaca area locations
         self.locations = {
@@ -38,13 +37,13 @@ class IthacaWeatherScraper:
                 pressure REAL,
                 visibility REAL,
                 uv_index REAL,
-                weather_main TEXT,
+                weather_condition TEXT,
                 weather_description TEXT,
                 wind_speed REAL,
-                wind_direction INTEGER,
+                wind_direction TEXT,
+                wind_degree INTEGER,
                 cloudiness INTEGER,
-                sunrise DATETIME,
-                sunset DATETIME,
+                is_day INTEGER,
                 raw_data TEXT
             )
         ''')
@@ -60,10 +59,9 @@ class IthacaWeatherScraper:
         
         coords = self.locations[location_name]
         params = {
-            'lat': coords['lat'],
-            'lon': coords['lon'],
-            'appid': self.api_key,
-            'units': 'imperial'
+            'key': self.api_key,
+            'q': f"{coords['lat']},{coords['lon']}",
+            'aqi': 'no'
         }
         
         try:
@@ -76,26 +74,25 @@ class IthacaWeatherScraper:
     
     def parse_weather_data(self, raw_data: Dict, location_name: str) -> Dict:
         """Parse raw API response into structured data"""
-        main = raw_data.get('main', {})
-        weather = raw_data.get('weather', [{}])[0]
-        wind = raw_data.get('wind', {})
-        sys = raw_data.get('sys', {})
+        current = raw_data.get('current', {})
+        condition = current.get('condition', {})
         
         return {
             'location': location_name,
             'timestamp': datetime.datetime.now(),
-            'temperature': main.get('temp'),
-            'feels_like': main.get('feels_like'),
-            'humidity': main.get('humidity'),
-            'pressure': main.get('pressure'),
-            'visibility': raw_data.get('visibility', 0) / 1000,  # Convert to km
-            'weather_main': weather.get('main'),
-            'weather_description': weather.get('description'),
-            'wind_speed': wind.get('speed'),
-            'wind_direction': wind.get('deg'),
-            'cloudiness': raw_data.get('clouds', {}).get('all'),
-            'sunrise': datetime.datetime.fromtimestamp(sys.get('sunrise', 0)),
-            'sunset': datetime.datetime.fromtimestamp(sys.get('sunset', 0)),
+            'temperature': current.get('temp_f'),
+            'feels_like': current.get('feelslike_f'),
+            'humidity': current.get('humidity'),
+            'pressure': current.get('pressure_in'),
+            'visibility': current.get('vis_miles'),
+            'uv_index': current.get('uv'),
+            'weather_condition': condition.get('text'),
+            'weather_description': condition.get('text'),
+            'wind_speed': current.get('wind_mph'),
+            'wind_direction': current.get('wind_dir'),
+            'wind_degree': current.get('wind_degree'),
+            'cloudiness': current.get('cloud'),
+            'is_day': current.get('is_day'),
             'raw_data': json.dumps(raw_data)
         }
     
@@ -107,9 +104,9 @@ class IthacaWeatherScraper:
         cursor.execute('''
             INSERT INTO weather_data (
                 location, timestamp, temperature, feels_like, humidity, pressure,
-                visibility, weather_main, weather_description, wind_speed,
-                wind_direction, cloudiness, sunrise, sunset, raw_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                visibility, uv_index, weather_condition, weather_description, 
+                wind_speed, wind_direction, wind_degree, cloudiness, is_day, raw_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             weather_data['location'],
             weather_data['timestamp'],
@@ -118,13 +115,14 @@ class IthacaWeatherScraper:
             weather_data['humidity'],
             weather_data['pressure'],
             weather_data['visibility'],
-            weather_data['weather_main'],
+            weather_data['uv_index'],
+            weather_data['weather_condition'],
             weather_data['weather_description'],
             weather_data['wind_speed'],
             weather_data['wind_direction'],
+            weather_data['wind_degree'],
             weather_data['cloudiness'],
-            weather_data['sunrise'],
-            weather_data['sunset'],
+            weather_data['is_day'],
             weather_data['raw_data']
         ))
         
@@ -133,7 +131,7 @@ class IthacaWeatherScraper:
     
     def scrape_all_locations(self):
         """Scrape weather data for all Ithaca locations"""
-        print(f"🌤️  Starting weather scrape at {datetime.datetime.now()}")
+        print(f"Starting weather scrape at {datetime.datetime.now()}")
         
         for location_name in self.locations:
             print(f"Fetching weather for {location_name}...")
@@ -142,14 +140,16 @@ class IthacaWeatherScraper:
             if raw_data:
                 parsed_data = self.parse_weather_data(raw_data, location_name)
                 self.save_weather_data(parsed_data)
-                print(f"✅ Saved {location_name}: {parsed_data['temperature']}°F, {parsed_data['weather_description']}")
+                temp = parsed_data['temperature']
+                condition = parsed_data['weather_condition']
+                print(f"✅ Saved {location_name}: {temp}°F, {condition}")
             else:
                 print(f"❌ Failed to fetch data for {location_name}")
             
             # Be nice to the API
             time.sleep(1)
         
-        print("🎉 Weather scrape completed!\n")
+        print("Weather scrape completed!")
     
     def get_recent_data(self, hours: int = 24) -> List[Dict]:
         """Get weather data from the last N hours"""
@@ -169,15 +169,37 @@ class IthacaWeatherScraper:
         
         conn.close()
         return results
+    
+    def get_location_summary(self):
+        """Get current weather summary for all locations"""
+        recent_data = self.get_recent_data(hours=1)
+        
+        if not recent_data:
+            print("No recent data found. Run scrape_all_locations() first.")
+            return
+        
+        print("\n=== ITHACA WEATHER SNAPSHOT ===")
+        for location in self.locations:
+            location_data = [d for d in recent_data if d['location'] == location]
+            if location_data:
+                data = location_data[0]  # Most recent
+                print(f"{location}: {data['temperature']}°F ({data['weather_condition']}) - Feels like {data['feels_like']}°F")
+        
+        # Calculate temperature variance
+        temps = [d['temperature'] for d in recent_data if d['temperature']]
+        if len(temps) > 1:
+            temp_range = max(temps) - min(temps)
+            print(f"\nTemperature variance across locations: {temp_range:.1f}°F")
+            if temp_range > 5:
+                print("🌡️ Significant temperature differences detected across Ithaca!")
 
 # Example usage
 if __name__ == "__main__":
-    # You'll need to get your API key from https://openweathermap.org/api
-    API_KEY = "your_openweathermap_api_key_here"
+    # You'll need to get your API key from https://www.weatherapi.com/
+    API_KEY = "aee5a02325c04b4a9eb161027252805"
     
     scraper = IthacaWeatherScraper(API_KEY)
     scraper.scrape_all_locations()
     
-    # Show recent data
-    recent = scraper.get_recent_data(hours=1)
-    print(f"Collected {len(recent)} data points in the last hour")
+    # Show summary
+    scraper.get_location_summary()
