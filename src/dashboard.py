@@ -140,7 +140,7 @@ class IthacaWeatherDashboard:
             )
         
         # Calculate temperature variance by hour
-        df['hour'] = df['timestamp'].dt.floor('H')
+        df['hour'] = df['timestamp'].dt.floor('h')
         variance_data = df.groupby('hour')['temperature'].agg(['min', 'max', 'std']).reset_index()
         variance_data['range'] = variance_data['max'] - variance_data['min']
         
