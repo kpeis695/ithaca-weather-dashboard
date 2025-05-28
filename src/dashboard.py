@@ -274,7 +274,7 @@ class IthacaWeatherDashboard:
         print(f"🌤️ Starting Ithaca Weather Dashboard...")
         print(f"📊 Dashboard will be available at: http://localhost:{port}")
         print(f"🔄 Data updates every 5 minutes")
-        self.app.run_server(debug=debug, port=port)
+        self.app.run(debug=debug, port=port)
 
 if __name__ == "__main__":
     dashboard = IthacaWeatherDashboard()
